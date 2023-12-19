@@ -1,16 +1,19 @@
-import os
-import sys
-
-sys.path.append("python/")
-
-import metrics
+from python.metrics import (
+    PairsExplained,
+    ClusterIntersection
+)
 import numpy as np
-from data import Dataloader
-from models import HeuristicModel, TwoClustersMIP
+from python.data import (
+    Dataloader
+)
+from python.models import (
+    HeuristicModel,
+    TwoClustersMIP
+)
 
 if __name__ == "__main__":
     ### First part: test of the MIP model
-    data_loader = Dataloader("data/dataset_4_test")  # Path to test dataset
+    data_loader = Dataloader("data/dataset_4")  # Path to test dataset
     X, Y = data_loader.load()
 
     model = TwoClustersMIP(
@@ -19,18 +22,18 @@ if __name__ == "__main__":
     model.fit(X, Y)
 
     # %Pairs Explained
-    pairs_explained = metrics.PairsExplained()
+    pairs_explained = PairsExplained()
     print("Percentage of explained preferences:", pairs_explained.from_model(model, X, Y))
 
     # %Cluster Intersection
-    cluster_intersection = metrics.ClusterIntersection()
+    cluster_intersection = ClusterIntersection()
 
     Z = data_loader.get_ground_truth_labels()
     print("% of pairs well grouped together by the model:")
     print("Cluster intersection for all samples:", cluster_intersection.from_model(model, X, Y, Z))
 
     ### 2nd part: test of the heuristic model
-    data_loader = Dataloader("data/dataset_10_test")  # Path to test dataset
+    data_loader = Dataloader("data/dataset_10")  # Path to test dataset
     X, Y = data_loader.load()
 
     indexes = np.linspace(0, len(X) - 1, num=len(X), dtype=int)
@@ -50,11 +53,11 @@ if __name__ == "__main__":
 
     # Validation on test set
     # %Pairs Explained
-    pairs_explained = metrics.PairsExplained()
+    pairs_explained = PairsExplained()
     print("Percentage of explained preferences:", pairs_explained.from_model(model, X_test, Y_test))
 
     # %Cluster Intersection
-    cluster_intersection = metrics.ClusterIntersection()
+    cluster_intersection = ClusterIntersection()
     print("% of pairs well grouped together by the model:")
     print(
         "Cluster intersection for all samples:",

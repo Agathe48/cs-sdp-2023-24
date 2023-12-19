@@ -2,7 +2,7 @@ import pickle
 from abc import abstractmethod
 
 import numpy as np
-
+from gurobipy import Model
 
 class BaseModel(object):
     """
@@ -167,15 +167,18 @@ class TwoClustersMIP(BaseModel):
         ----------
         n_pieces: int
             Number of pieces for the utility function of each feature.
-        n°clusters: int
+        n_clusters: int
             Number of clusters to implement in the MIP.
         """
         self.seed = 123
+        self.n_pieces = n_pieces
+        self.n_clusters = n_clusters
         self.model = self.instantiate()
 
     def instantiate(self):
         """Instantiation of the MIP Variables - To be completed."""
-        # To be completed
+        self.model = Model("UTA model")
+        # on peut utiliser model.addVar pour rajouter des variables
         return
 
     def fit(self, X, Y):
@@ -190,6 +193,10 @@ class TwoClustersMIP(BaseModel):
         """
 
         # To be completed
+        self.model.addConstr(np.sum(X) > np.sum(Y)) # RAJOUTER LA CONTRAINTE AVEC LE DEUXI7ME CLUSTER ET PRENDRE EN COMPTE Z
+
+        # Entraînement du modèle
+        self.model.optimize()
         return
 
     def predict_utility(self, X):
@@ -201,7 +208,7 @@ class TwoClustersMIP(BaseModel):
             (n_samples, n_features) list of features of elements
         """
         # To be completed
-        # Do not forget that this method is called in predict_preference (line 42) and therefor should return well-organized data for it to work.
+        # Do not forget that this method is called in predict_preference (line 42) and therefore should return well-organized data for it to work.
         return
 
 
