@@ -9,12 +9,14 @@ from data import Dataloader
 from models import HeuristicModel, TwoClustersMIP
 
 if __name__ == "__main__":
-    ### First part: test of the MIP model
-    data_loader = Dataloader("data/dataset_4_test")  # Path to test dataset
+    #####################################
+    # First part: test of the MIP model #
+    #####################################
+    data_loader = Dataloader("data/dataset_4")  # Path to test dataset
     X, Y = data_loader.load()
 
     model = TwoClustersMIP(
-        n_clusters=2, n_pieces=5
+        n_clusters=2, n_pieces=5, n_pairs = 2000, n_criteria = 4,
     )  # You can add your model's arguments here, the best would be set up the right ones as default.
     model.fit(X, Y)
 
@@ -29,8 +31,12 @@ if __name__ == "__main__":
     print("% of pairs well grouped together by the model:")
     print("Cluster intersection for all samples:", cluster_intersection.from_model(model, X, Y, Z))
 
-    ### 2nd part: test of the heuristic model
-    data_loader = Dataloader("data/dataset_10_test")  # Path to test dataset
+
+
+    #########################################
+    # 2nd part: test of the heuristic model #
+    #########################################
+    data_loader = Dataloader("data/dataset_10")  # Path to test dataset
     X, Y = data_loader.load()
 
     indexes = np.linspace(0, len(X) - 1, num=len(X), dtype=int)

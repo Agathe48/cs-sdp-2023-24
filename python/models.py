@@ -1,5 +1,7 @@
 import pickle
 from abc import abstractmethod
+import gurobipy as gp
+from gurobipy import GRB
 
 import numpy as np
 
@@ -153,14 +155,14 @@ class RandomExampleModel(BaseModel):
             (n_samples, n_features) list of features of elements
         """
         return np.stack([np.dot(X, self.weights[0]), np.dot(X, self.weights[1])], axis=1)
-
+        
 
 class TwoClustersMIP(BaseModel):
     """Skeleton of MIP you have to write as the first exercise.
     You have to encapsulate your code within this class that will be called for evaluation.
     """
 
-    def __init__(self, n_pieces, n_clusters):
+    def __init__(self, n_pieces, n_criteria, n_pairs, n_clusters):
         """Initialization of the MIP Variables
 
         Parameters
@@ -171,12 +173,34 @@ class TwoClustersMIP(BaseModel):
             Number of clusters to implement in the MIP.
         """
         self.seed = 123
+        self.n_pieces = n_pieces
+        self.n_clusters = n_clusters
+        self.n_pairs = n_pairs
+        self.n_criteria = n_criteria
         self.model = self.instantiate()
+
+    def compute_score(self, x, cluster, evaluate:bool = False):
+        get_val = (lambda v: v.X) if evaluate else (lambda v: v)
+        score = 0
+
+        for i in range (self.n_criteria):
+            x_i = x[i]
+            for l in range(self.n_pieces):
+                x_i_l = l/self.n_pieces
+                if x_i <= x_i_l:
+                    break
+            if l > 0 :
+                score += (get_val(self.score_k_i_l[cluster][i][l]) - get_val(self.score_k_i_l[cluster][i][l-1])) / self.n_pieces
+            else:
+                score += get_val(self.score_k_i_l[cluster][i][l]) / self.n_pieces
+        return score
 
     def instantiate(self):
         """Instantiation of the MIP Variables - To be completed."""
-        # To be completed
-        return
+        # Gurobi model instantiation
+        model = gp.Model("TwoClustersMIP")
+
+        return model
 
     def fit(self, X, Y):
         """Estimation of the parameters - To be completed.
@@ -189,8 +213,62 @@ class TwoClustersMIP(BaseModel):
             (n_samples, n_features) features of unchosen elements
         """
 
-        # To be completed
-        return
+        # Variable
+        sigma_x_plus = [self.model.addVar(name=f"sigma_x_+_{i}") for i in range(self.n_pairs)]
+        sigma_x_minus = [self.model.addVar(name=f"sigma_x_-_{i}") for i in range(self.n_pairs)]
+        sigma_y_plus = [self.model.addVar(name=f"sigma_y_+_{i}") for i in range(self.n_pairs)]
+        sigma_y_minus = [self.model.addVar(name=f"sigma_y_-_{i}") for i in range(self.n_pairs)]
+        M = 500
+
+        delta_j_k = []
+        for j in range(self.n_pairs):
+            list_temp = []
+            for k in range (self.n_clusters) : 
+                list_temp.append(self.model.addVar(vtype=gp.GRB.BINARY, name=f"delta_j_k_{j}_{k}"))
+            delta_j_k.append(list_temp)
+
+        self.score_k_i_l = []
+        for k in range(self.n_clusters):
+            list_temp_i = []
+            for i in range (self.n_criteria):
+                list_temp_l = []
+                for l in range (self.n_pieces):
+                    list_temp_l.append(self.model.addVar(lb=0, ub=1, vtype='C', name=f"score_k_i_l_{k}_{i}_{l}"))
+                list_temp_i.append(list_temp_l)
+            self.score_k_i_l.append(list_temp_i)
+    
+        # Update 
+        self.model.update()
+
+        # Objective function
+        self.model.setObjective(sum(sigma_x_plus) + sum(sigma_x_minus) + sum(sigma_y_plus) + sum(sigma_y_minus), GRB.MINIMIZE) 
+
+
+        # Contrainte 1 : Origine à 0
+        for k in range(self.n_clusters):
+            for i in range(self.n_criteria):
+                self.model.addConstr(self.score_k_i_l[k][i][0]==0)
+
+        # Contrainte 2 : Normalisation
+        for k in range (self.n_clusters):
+            for i in range (self.n_criteria):
+                self.model.addConstr(sum(self.score_k_i_l[k][i])==1)
+        
+        # Contrainte 3 : Contrainte sur les erreurs avec les points de cassure
+        for counter_x in range(len(X)):
+            x = X[counter_x]
+            y = Y[counter_x]
+            for k in range (self.n_clusters):
+                score_x = self.compute_score(x, cluster=k)
+                score_y = self.compute_score(y, cluster=k)
+                self.model.addConstr((1-delta_j_k[counter_x][k])*M + score_x - sigma_x_plus[counter_x] + sigma_x_minus[counter_x] - (score_y - sigma_y_plus[counter_x] + sigma_y_minus[counter_x]) >= 0)
+        
+        # Contrainte 4 : Appartenance à l'un des deux clusters
+        for j in range (self.n_pairs):
+            self.model.addConstr(sum(delta_j_k[j])>=1)
+
+        # Solve it!
+        self.model.optimize()
 
     def predict_utility(self, X):
         """Return Decision Function of the MIP for X. - To be completed.
@@ -200,9 +278,14 @@ class TwoClustersMIP(BaseModel):
         X: np.ndarray
             (n_samples, n_features) list of features of elements
         """
+        results = []
         # To be completed
-        # Do not forget that this method is called in predict_preference (line 42) and therefor should return well-organized data for it to work.
-        return
+        for x in X:
+            list_temp_k = []
+            for k in range(self.n_clusters):
+                list_temp_k.append(self.compute_score(x, cluster=k, evaluate=True))
+            results.append(list_temp_k)
+        return np.array(results)
 
 
 class HeuristicModel(BaseModel):
