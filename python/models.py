@@ -1,7 +1,7 @@
 import pickle
 from abc import abstractmethod
 import gurobipy as gp
-from gurobipy import GRB
+from gurobipy import GRB, quicksum
 
 import numpy as np
 
@@ -154,14 +154,13 @@ class RandomExampleModel(BaseModel):
             (n_samples, n_features) list of features of elements
         """
         return np.stack([np.dot(X, self.weights[0]), np.dot(X, self.weights[1])], axis=1)
-        
 
 class TwoClustersMIP(BaseModel):
     """Skeleton of MIP you have to write as the first exercise.
     You have to encapsulate your code within this class that will be called for evaluation.
     """
 
-    def __init__(self, n_pieces, n_clusters, n_pairs, n_criteria):
+    def __init__(self, n_pieces, n_clusters):
         """Initialization of the MIP Variables
 
         Parameters
@@ -170,16 +169,10 @@ class TwoClustersMIP(BaseModel):
             Number of pieces for the utility function of each feature.
         n_clusters: int
             Number of clusters to implement in the MIP.
-        n_pairs: int
-            Number of pairs in X and in Y.
-        n_criteria: int
-            Number of critera in X and in Y.
         """
         self.seed = 123
         self.n_pieces = n_pieces
         self.n_clusters = n_clusters
-        self.n_pairs = n_pairs
-        self.n_criteria = n_criteria
         self.model = self.instantiate()
 
     def compute_score(self, x, cluster, evaluate:bool = False):
@@ -219,17 +212,19 @@ class TwoClustersMIP(BaseModel):
         Y: np.ndarray
             (n_samples, n_features) features of unchosen elements
         """
+        self.n_pairs = len(X)
+        self.n_criteria = len(X[0])
 
         ### Variables ###
 
         # Surestimation error on x
-        self.sigma_x_plus = [self.model.addVar(name=f"sigma_x_+_{j}") for j in range(self.n_pairs)]
+        self.sigma_x_plus = [self.model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"sigma_x_+_{j}") for j in range(self.n_pairs)]
         # Underestimation error on x
-        self.sigma_x_minus = [self.model.addVar(name=f"sigma_x_-_{j}") for j in range(self.n_pairs)]
+        self.sigma_x_minus = [self.model.addVar(vtype=GRB.CONTINUOUS, lb=0,name=f"sigma_x_-_{j}") for j in range(self.n_pairs)]
         # Surestimation error on y
-        self.sigma_y_plus = [self.model.addVar(name=f"sigma_y_+_{j}") for j in range(self.n_pairs)]
+        self.sigma_y_plus = [self.model.addVar(vtype=GRB.CONTINUOUS, lb=0,name=f"sigma_y_+_{j}") for j in range(self.n_pairs)]
         # Underestimation error on y
-        self.sigma_y_minus = [self.model.addVar(name=f"sigma_y_-_{j}") for j in range(self.n_pairs)]
+        self.sigma_y_minus = [self.model.addVar(vtype=GRB.CONTINUOUS, lb=0,name=f"sigma_y_-_{j}") for j in range(self.n_pairs)]
         M = self.n_criteria
 
         self.delta_j_k = []
@@ -253,7 +248,7 @@ class TwoClustersMIP(BaseModel):
         self.model.update()
 
         ### Objective function ###
-        self.model.setObjective(sum(self.sigma_x_plus) + sum(self.sigma_x_minus) + sum(self.sigma_y_plus) + sum(self.sigma_y_minus), GRB.MINIMIZE) 
+        self.model.setObjective(quicksum(self.sigma_x_plus) + quicksum(self.sigma_x_minus) + quicksum(self.sigma_y_plus) + quicksum(self.sigma_y_minus), GRB.MINIMIZE) 
 
         # Contrainte 1 : Origine à 0
         for k in range(self.n_clusters):
@@ -263,7 +258,7 @@ class TwoClustersMIP(BaseModel):
         # Contrainte 2 : Normalisation
         for k in range (self.n_clusters):
             for i in range (self.n_criteria):
-                self.model.addConstr(sum(self.score_k_i_l[k][i])==1)
+                self.model.addConstr(quicksum(self.score_k_i_l[k][i])==1)
         
         # Contrainte 3 : Croissance des fonctions par morceaux
         for k in range(self.n_clusters):
@@ -279,16 +274,23 @@ class TwoClustersMIP(BaseModel):
                 score_x = self.compute_score(x, cluster=k)
                 score_y = self.compute_score(y, cluster=k)
                 self.model.addConstr((1-self.delta_j_k[j][k])*M + (score_x - self.sigma_x_plus[j] + self.sigma_x_minus[j]) - (score_y - self.sigma_y_plus[j] + self.sigma_y_minus[j]) >= 0)
-        
+
         # Contrainte 5 : Appartenance à au moins l'un des deux clusters
         for j in range (self.n_pairs):
-            self.model.addConstr(sum(self.delta_j_k[j])>=1)
+            self.model.addConstr(quicksum(self.delta_j_k[j])>=1)
 
         # Update of the model
         self.model.update()
 
         # Solve it!
         self.model.optimize()
+
+        if self.model.status == GRB.INFEASIBLE:
+            print("--- Aucune solution ---")
+        elif self.model.status == GRB.UNBOUNDED:
+            print("--- Non borné ---")
+        else:
+            print("--- Il y a une solution ---")
 
     def predict_utility(self, X):
         """Return Decision Function of the MIP for X. - To be completed.
