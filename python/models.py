@@ -173,19 +173,18 @@ class TwoClustersMIP(BaseModel):
         self.seed = 123
         self.n_pieces = n_pieces
         self.n_clusters = n_clusters
+        self.epsilon = 0.0001
         self.model = self.instantiate()
 
     def compute_score(self, x, cluster, evaluate:bool = False):
         get_val = (lambda v: v.X) if evaluate else (lambda v: v)
         score = 0
 
-        width_interval = 1 / (self.n_pieces-1)
+        width_interval = 1 / self.n_pieces
         for i in range (self.n_criteria):
             x_i = x[i]
-            for l in range(1, self.n_pieces):
-                x_i_l = l*width_interval
-                if x_i <= x_i_l:
-                    break
+            l = int((x_i / width_interval) + 1)
+            x_i_l = l*width_interval
 
             a = (get_val(self.score_k_i_l[cluster][i][l]) - get_val(self.score_k_i_l[cluster][i][l-1]))/width_interval
             offset = x_i_l - width_interval
@@ -239,7 +238,7 @@ class TwoClustersMIP(BaseModel):
             list_temp_i = []
             for i in range (self.n_criteria):
                 list_temp_l = []
-                for l in range (self.n_pieces):
+                for l in range (self.n_pieces+1):
                     list_temp_l.append(self.model.addVar(lb=0, ub=1, vtype='C', name=f"score_k_i_l_{k}_{i}_{l}"))
                 list_temp_i.append(list_temp_l)
             self.score_k_i_l.append(list_temp_i)
@@ -248,7 +247,7 @@ class TwoClustersMIP(BaseModel):
         self.model.update()
 
         ### Objective function ###
-        self.model.setObjective(quicksum(self.sigma_x_plus) + quicksum(self.sigma_x_minus) + quicksum(self.sigma_y_plus) + quicksum(self.sigma_y_minus), GRB.MINIMIZE) 
+        self.model.setObjective(quicksum(self.sigma_x_plus) + quicksum(self.sigma_x_minus) + quicksum(self.sigma_y_plus) + quicksum(self.sigma_y_minus), GRB.MINIMIZE)
 
         # Contrainte 1 : Origine à 0
         for k in range(self.n_clusters):
@@ -256,31 +255,27 @@ class TwoClustersMIP(BaseModel):
                 self.model.addConstr(self.score_k_i_l[k][i][0]==0)
 
         # Contrainte 2 : Normalisation
-        for k in range (self.n_clusters):
-            for i in range (self.n_criteria):
-                self.model.addConstr(quicksum(self.score_k_i_l[k][i])==1)
+        for k in range(self.n_clusters):
+            self.model.addConstr(quicksum(self.score_k_i_l[k][i][self.n_pieces] for i in range(self.n_criteria)) == 1)
         
         # Contrainte 3 : Croissance des fonctions par morceaux
         for k in range(self.n_clusters):
             for i in range(self.n_criteria):
-                for l in range(self.n_pieces-1):
+                for l in range(self.n_pieces):
                     self.model.addConstr(self.score_k_i_l[k][i][l+1] >= self.score_k_i_l[k][i][l])
 
         # Contrainte 4 : Contrainte sur les erreurs avec les points de cassure
         for j in range(self.n_pairs):
             x = X[j]
             y = Y[j]
-            for k in range (self.n_clusters):
+            for k in range(self.n_clusters):
                 score_x = self.compute_score(x, cluster=k)
                 score_y = self.compute_score(y, cluster=k)
-                self.model.addConstr((1-self.delta_j_k[j][k])*M + (score_x - self.sigma_x_plus[j] + self.sigma_x_minus[j]) - (score_y - self.sigma_y_plus[j] + self.sigma_y_minus[j]) >= 0)
+                self.model.addConstr((1-self.delta_j_k[j][k])*M + (score_x - self.sigma_x_plus[j] + self.sigma_x_minus[j]) - (score_y - self.sigma_y_plus[j] + self.sigma_y_minus[j]) >= self.epsilon)
 
         # Contrainte 5 : Appartenance à au moins l'un des deux clusters
-        for j in range (self.n_pairs):
+        for j in range(self.n_pairs):
             self.model.addConstr(quicksum(self.delta_j_k[j])>=1)
-
-        # Update of the model
-        self.model.update()
 
         # Solve it!
         self.model.optimize()
