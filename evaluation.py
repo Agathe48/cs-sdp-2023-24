@@ -1,12 +1,15 @@
-import os
-import sys
-
-sys.path.append("python/")
-
-import metrics
+from python.metrics import (
+    PairsExplained,
+    ClusterIntersection
+)
 import numpy as np
-from data import Dataloader
-from models import HeuristicModel, TwoClustersMIP
+from python.data import (
+    Dataloader
+)
+from python.models import (
+    HeuristicModel,
+    TwoClustersMIP
+)
 
 if __name__ == "__main__":
     #####################################
@@ -21,11 +24,11 @@ if __name__ == "__main__":
     model.fit(X, Y)
 
     # %Pairs Explained
-    pairs_explained = metrics.PairsExplained()
+    pairs_explained = PairsExplained()
     print("Percentage of explained preferences:", pairs_explained.from_model(model, X, Y))
 
     # %Cluster Intersection
-    cluster_intersection = metrics.ClusterIntersection()
+    cluster_intersection = ClusterIntersection()
 
     Z = data_loader.get_ground_truth_labels()
     print("% of pairs well grouped together by the model:")
@@ -56,11 +59,11 @@ if __name__ == "__main__":
 
     # Validation on test set
     # %Pairs Explained
-    pairs_explained = metrics.PairsExplained()
+    pairs_explained = PairsExplained()
     print("Percentage of explained preferences:", pairs_explained.from_model(model, X_test, Y_test))
 
     # %Cluster Intersection
-    cluster_intersection = metrics.ClusterIntersection()
+    cluster_intersection = ClusterIntersection()
     print("% of pairs well grouped together by the model:")
     print(
         "Cluster intersection for all samples:",

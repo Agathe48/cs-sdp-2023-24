@@ -4,7 +4,7 @@ import gurobipy as gp
 from gurobipy import GRB
 
 import numpy as np
-
+from gurobipy import Model
 
 class BaseModel(object):
     """
@@ -169,7 +169,7 @@ class TwoClustersMIP(BaseModel):
         ----------
         n_pieces: int
             Number of pieces for the utility function of each feature.
-        n°clusters: int
+        n_clusters: int
             Number of clusters to implement in the MIP.
         """
         self.seed = 123
