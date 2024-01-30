@@ -6,6 +6,10 @@ import random as rd
 
 import numpy as np
 
+
+from python.metrics import PairsExplained, ClusterIntersection
+
+
 class BaseModel(object):
     """
     Base class for models, to be used as coding pattern skeleton.
@@ -342,7 +346,7 @@ class HeuristicModel(BaseModel):
         best_cluster = np.argmax(np.array(list_scores))
         return best_cluster
 
-    def fit(self, X, Y):
+    def fit(self, X, Y, Z):
         """Estimation of the parameters - To be completed.
 
         Parameters
@@ -365,7 +369,12 @@ class HeuristicModel(BaseModel):
         self.delta_j_k = np.array(self.delta_j_k)
         self.delta_j_k_bool = np.array(self.delta_j_k, dtype=bool)
 
-        for iteration in range(self.nb_iterations):
+        pairs_explained = PairsExplained()
+        cluster_intersection = ClusterIntersection()
+        self.list_results = []
+
+        from tqdm import tqdm
+        for iteration in tqdm(range(self.nb_iterations)):
 
             # Fit the decision functions
             for cluster in range(len(self.models)):
@@ -380,6 +389,11 @@ class HeuristicModel(BaseModel):
                         self.delta_j_k_bool[j][cluster] = False
                     else:
                         self.delta_j_k_bool[j][cluster] = True
+
+            list_temp = [pairs_explained.from_model(self, X, Y), cluster_intersection.from_model(self, X, Y, Z)]
+            self.list_results.append(list_temp)
+            print("---------", list_temp)
+
 
     def predict_utility(self, X):
         """Return Decision Function of the MIP for X. - To be completed.
