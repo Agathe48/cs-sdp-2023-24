@@ -3,9 +3,8 @@ from abc import abstractmethod
 import gurobipy as gp
 from gurobipy import GRB, quicksum
 import random as rd
-
+from tqdm import tqdm
 import numpy as np
-
 
 from python.metrics import PairsExplained, ClusterIntersection
 
@@ -321,6 +320,8 @@ class HeuristicModel(BaseModel):
         """Initialization of the Heuristic Model.
         """
         self.seed = 123
+        self.epsilon = 0.0001
+        self.single_cluster_mode = False
         self.n_clusters = n_clusters
         self.n_pieces = n_pieces
         self.nb_iterations = nb_iterations
@@ -337,14 +338,26 @@ class HeuristicModel(BaseModel):
 
         return models
 
-    def choose_best_cluster(self, x, y):
+    def choose_best_clusters(self, x=None, y=None, score_x_array=None, score_y_array=None):
         list_scores = []
+        best_clusters = []
         for cluster in range(self.n_clusters):
-            score_x = self.models[cluster].compute_score(x, 0, True)
-            score_y = self.models[cluster].compute_score(y, 0, True)
+            if score_x_array is None or score_y_array is None:
+                score_x = self.models[cluster].compute_score(x, 0, True)
+                score_y = self.models[cluster].compute_score(y, 0, True)
+            else:
+                score_x = score_x_array[cluster]
+                score_y = score_y_array[cluster]
             list_scores.append(score_x - score_y)
-        best_cluster = np.argmax(np.array(list_scores))
-        return best_cluster
+
+            # If we authorise to have more than one cluster
+            if not self.single_cluster_mode:
+                if score_x - score_y > self.epsilon:
+                    best_clusters.append(cluster)
+
+        if len(best_clusters) == 0:
+            best_clusters.append(np.argmax(np.array(list_scores)))
+        return best_clusters
 
     def fit(self, X, Y, Z):
         """Estimation of the parameters - To be completed.
@@ -359,12 +372,19 @@ class HeuristicModel(BaseModel):
         self.n_pairs = len(X)
         self.n_criteria = len(X[0])
 
-        # Initialize the products in clusters randomly
+        # MIP model trained on only 2000 examples to initialize the model
+        self.initialisation_model = TwoClustersMIP(n_pieces=self.n_pieces, n_clusters=self.n_clusters)
+        self.initialisation_model.fit(X[:200], Y[:200])
+
+        # Initialize the products in the clusters depending on the initialisation MIP model
+        init_results_x = self.initialisation_model.predict_utility(X)
+        init_results_y = self.initialisation_model.predict_utility(Y)
         self.delta_j_k = []
         for j in range(self.n_pairs):
+            best_clusters = self.choose_best_clusters(score_x_array=init_results_x[j], score_y_array=init_results_y[j])
             list_temp = [0]*self.n_clusters
-            choosen_cluster = rd.randint(0, self.n_clusters-1)
-            list_temp[choosen_cluster] = 1
+            for best_cluster in best_clusters:
+                list_temp[best_cluster] = 1
             self.delta_j_k.append(list_temp)
         self.delta_j_k = np.array(self.delta_j_k)
         self.delta_j_k_bool = np.array(self.delta_j_k, dtype=bool)
@@ -373,22 +393,24 @@ class HeuristicModel(BaseModel):
         cluster_intersection = ClusterIntersection()
         self.list_results = []
 
-        from tqdm import tqdm
         for iteration in tqdm(range(self.nb_iterations)):
 
             # Fit the decision functions
             for cluster in range(len(self.models)):
                 model = self.models[cluster]
-                model.fit(X[np.transpose(self.delta_j_k_bool[:, cluster])], Y[np.transpose(self.delta_j_k_bool[:, cluster])])
+                if len(X[self.delta_j_k_bool[:, cluster]]) > 0:
+                    model.fit(X[np.transpose(self.delta_j_k_bool[:, cluster])], Y[np.transpose(self.delta_j_k_bool[:, cluster])])
+                else:
+                    print("--- ERROR : EQUAL TO 0 ---")
 
             # Attribute the clusters
             for j in range(self.n_pairs):
-                best_cluster = self.choose_best_cluster(X[j], Y[j])
+                best_clusters = self.choose_best_clusters(X[j], Y[j])
                 for cluster in range(self.n_clusters):
-                    if cluster != best_cluster:
-                        self.delta_j_k_bool[j][cluster] = False
-                    else:
+                    if cluster in best_clusters:
                         self.delta_j_k_bool[j][cluster] = True
+                    else:
+                        self.delta_j_k_bool[j][cluster] = False
 
             list_temp = [pairs_explained.from_model(self, X, Y), cluster_intersection.from_model(self, X, Y, Z)]
             self.list_results.append(list_temp)
