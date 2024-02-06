@@ -321,7 +321,7 @@ class HeuristicModel(BaseModel):
         """
         self.seed = 123
         self.epsilon = 0.0001
-        self.single_cluster_mode = False
+        self.single_cluster_mode = True
         self.n_clusters = n_clusters
         self.n_pieces = n_pieces
         self.nb_iterations = nb_iterations
