@@ -2,8 +2,12 @@ import pickle
 from abc import abstractmethod
 import gurobipy as gp
 from gurobipy import GRB, quicksum
-
+import random as rd
+from tqdm import tqdm
 import numpy as np
+
+from python.metrics import PairsExplained, ClusterIntersection
+
 
 class BaseModel(object):
     """
@@ -183,7 +187,10 @@ class TwoClustersMIP(BaseModel):
         width_interval = 1 / self.n_pieces
         for i in range (self.n_criteria):
             x_i = x[i]
-            l = int((x_i / width_interval) + 1)
+            if x_i == 1:
+                l = self.n_pieces
+            else:
+                l = int((x_i / width_interval) + 1)
             x_i_l = l*width_interval
 
             a = (get_val(self.score_k_i_l[cluster][i][l]) - get_val(self.score_k_i_l[cluster][i][l-1]))/width_interval
@@ -309,16 +316,48 @@ class HeuristicModel(BaseModel):
     You have to encapsulate your code within this class that will be called for evaluation.
     """
 
-    def __init__(self):
+    def __init__(self, n_clusters, n_pieces, nb_iterations):
         """Initialization of the Heuristic Model.
         """
         self.seed = 123
+        self.epsilon = 0.0001
+        self.single_cluster_mode = True
+        self.n_clusters = n_clusters
+        self.n_pieces = n_pieces
+        self.nb_iterations = nb_iterations
         self.models = self.instantiate()
 
     def instantiate(self):
         """Instantiation of the MIP Variables"""
-        # To be completed
-        return
+        models = []
+
+        for cluster in range(self.n_clusters):
+            # Create UTA models for each cluster
+            new_model = TwoClustersMIP(n_pieces=self.n_pieces, n_clusters=1)
+            models.append(new_model)
+
+        return models
+
+    def choose_best_clusters(self, x=None, y=None, score_x_array=None, score_y_array=None):
+        list_scores = []
+        best_clusters = []
+        for cluster in range(self.n_clusters):
+            if score_x_array is None or score_y_array is None:
+                score_x = self.models[cluster].compute_score(x, 0, True)
+                score_y = self.models[cluster].compute_score(y, 0, True)
+            else:
+                score_x = score_x_array[cluster]
+                score_y = score_y_array[cluster]
+            list_scores.append(score_x - score_y)
+
+            # If we authorise to have more than one cluster
+            if not self.single_cluster_mode:
+                if score_x - score_y > self.epsilon:
+                    best_clusters.append(cluster)
+
+        if len(best_clusters) == 0:
+            best_clusters.append(np.argmax(np.array(list_scores)))
+        return best_clusters
 
     def fit(self, X, Y):
         """Estimation of the parameters - To be completed.
@@ -330,8 +369,44 @@ class HeuristicModel(BaseModel):
         Y: np.ndarray
             (n_samples, n_features) features of unchosen elements
         """
-        # To be completed
-        return
+        self.n_pairs = len(X)
+        self.n_criteria = len(X[0])
+
+        # MIP model trained on only 2000 examples to initialize the model
+        self.initialisation_model = TwoClustersMIP(n_pieces=self.n_pieces, n_clusters=self.n_clusters)
+        self.initialisation_model.fit(X[:200], Y[:200])
+
+        # Initialize the products in the clusters depending on the initialisation MIP model
+        init_results_x = self.initialisation_model.predict_utility(X)
+        init_results_y = self.initialisation_model.predict_utility(Y)
+        self.delta_j_k = []
+        for j in range(self.n_pairs):
+            best_clusters = self.choose_best_clusters(score_x_array=init_results_x[j], score_y_array=init_results_y[j])
+            list_temp = [0]*self.n_clusters
+            for best_cluster in best_clusters:
+                list_temp[best_cluster] = 1
+            self.delta_j_k.append(list_temp)
+        self.delta_j_k = np.array(self.delta_j_k)
+        self.delta_j_k_bool = np.array(self.delta_j_k, dtype=bool)
+
+        for iteration in tqdm(range(self.nb_iterations)):
+
+            # Fit the decision functions
+            for cluster in range(len(self.models)):
+                model = self.models[cluster]
+                if len(X[self.delta_j_k_bool[:, cluster]]) > 0:
+                    model.fit(X[np.transpose(self.delta_j_k_bool[:, cluster])], Y[np.transpose(self.delta_j_k_bool[:, cluster])])
+                else:
+                    print("--- ERROR : EQUAL TO 0 ---")
+
+            # Attribute the clusters
+            for j in range(self.n_pairs):
+                best_clusters = self.choose_best_clusters(X[j], Y[j])
+                for cluster in range(self.n_clusters):
+                    if cluster in best_clusters:
+                        self.delta_j_k_bool[j][cluster] = True
+                    else:
+                        self.delta_j_k_bool[j][cluster] = False
 
     def predict_utility(self, X):
         """Return Decision Function of the MIP for X. - To be completed.
@@ -341,6 +416,12 @@ class HeuristicModel(BaseModel):
         X: np.ndarray
             (n_samples, n_features) list of features of elements
         """
-        # To be completed
-        # Do not forget that this method is called in predict_preference (line 42) and therefor should return well-organized data for it to work.
-        return
+        results = []
+        for j in range(len(X)):
+            x = X[j]
+            list_temp_k = []
+            for k in range(self.n_clusters):
+                model = self.models[k]
+                list_temp_k.append(model.compute_score(x, cluster=0, evaluate=True))
+            results.append(list_temp_k)
+        return np.array(results)
