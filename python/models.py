@@ -227,7 +227,6 @@ class OneClusterMIP(BaseModel):
         self.sigma_y_plus = [self.model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"sigma_y_+_{j}") for j in range(self.n_pairs)]
         # Underestimation error on y
         self.sigma_y_minus = [self.model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"sigma_y_-_{j}") for j in range(self.n_pairs)]
-        M = self.n_criteria
 
         self.score_i_l = []
         for i in range(self.n_criteria):
@@ -443,7 +442,7 @@ class HeuristicModel(BaseModel):
     You have to encapsulate your code within this class that will be called for evaluation.
     """
 
-    def __init__(self, n_clusters, n_pieces, nb_iterations):
+    def __init__(self, n_clusters, n_pieces, nb_iterations, nb_inits=20, nb_pairs_to_take_init=200):
         """Initialization of the Heuristic Model.
         """
         self.seed = 123
@@ -452,6 +451,8 @@ class HeuristicModel(BaseModel):
         self.n_clusters = n_clusters
         self.n_pieces = n_pieces
         self.nb_iterations = nb_iterations
+        self.nb_inits = nb_inits
+        self.nb_pairs_to_take_init = nb_pairs_to_take_init
         self.models = self.instantiate()
 
     def instantiate(self):
@@ -460,7 +461,7 @@ class HeuristicModel(BaseModel):
 
         for cluster in range(self.n_clusters):
             # Create UTA models for each cluster
-            new_model = TwoClustersMIP(n_pieces=self.n_pieces, n_clusters=1)
+            new_model = OneClusterMIP(n_pieces=self.n_pieces)
             models.append(new_model)
 
         return models
@@ -470,8 +471,8 @@ class HeuristicModel(BaseModel):
         best_clusters = []
         for cluster in range(self.n_clusters):
             if score_x_array is None or score_y_array is None:
-                score_x = self.models[cluster].compute_score(x, 0, True)
-                score_y = self.models[cluster].compute_score(y, 0, True)
+                score_x = self.models[cluster].compute_score(x, True)
+                score_y = self.models[cluster].compute_score(y, True)
             else:
                 score_x = score_x_array[cluster]
                 score_y = score_y_array[cluster]
@@ -486,7 +487,27 @@ class HeuristicModel(BaseModel):
             best_clusters.append(np.argmax(np.array(list_scores)))
         return best_clusters
 
-    def train_init_model(self, counter, X, Y):
+    def take_random_pairs(self, X, Y):
+        """
+        Take randomly a certain amount of pairs to init the model.
+        
+        Parameters
+        ----------
+        X: np.ndarray
+            (n_samples, n_features) features of elements preferred to Y elements
+        Y: np.ndarray
+            (n_samples, n_features) features of unchosen elements
+        
+        Returns
+        -------
+        (np.ndarray, np.ndarray)
+            Portion of X and Y randomly taken.
+        """
+        probability = self.nb_pairs_to_take_init / self.n_pairs
+        random_matrix = np.random.rand(self.n_pairs) < probability
+        return X[random_matrix], Y[random_matrix]
+
+    def train_init_model(self, X, Y):
         """
         Train one of the init models on 200 examples and compute the first metric.
         
@@ -504,10 +525,10 @@ class HeuristicModel(BaseModel):
         None
         """
         initialisation_model = TwoClustersMIP(n_pieces=self.n_pieces, n_clusters=self.n_clusters)
-        initialisation_model.fit(X[counter*200:(counter+1)*200], Y[counter*200:(counter+1)*200])
+        X_random, Y_random = self.take_random_pairs(X, Y)
+        initialisation_model.fit(X_random, Y_random)
 
         pairs_explained = PairsExplained()
-        cluster_intersection = ClusterIntersection()
         metric_pairs = pairs_explained.from_model(initialisation_model, X, Y)
         self.list_initialisation_models.append([initialisation_model, metric_pairs])
 
@@ -526,14 +547,8 @@ class HeuristicModel(BaseModel):
 
         self.list_initialisation_models = []
         # MIP model trained on only 200 examples to initialize the model
-        for counter in range(int(self.n_pairs/200)):
-            # We take the first iteration to be sure to have one
-            if len(self.list_initialisation_models) == 0:
-                self.train_init_model(counter, X, Y)
-
-            # We only take 10% of the inits randomly
-            elif rd.random() <= 0.1:
-                self.train_init_model(counter, X, Y)
+        for counter in range(self.nb_inits):
+            self.train_init_model(X, Y)
 
         self.initialisation_model = self.list_initialisation_models[0][0]
         highscore = self.list_initialisation_models[0][1]
@@ -588,6 +603,6 @@ class HeuristicModel(BaseModel):
             list_temp_k = []
             for k in range(self.n_clusters):
                 model = self.models[k]
-                list_temp_k.append(model.compute_score(x, cluster=0, evaluate=True))
+                list_temp_k.append(model.compute_score(x, evaluate=True))
             results.append(list_temp_k)
         return np.array(results)
