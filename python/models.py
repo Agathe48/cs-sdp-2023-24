@@ -359,6 +359,31 @@ class HeuristicModel(BaseModel):
             best_clusters.append(np.argmax(np.array(list_scores)))
         return best_clusters
 
+    def train_init_model(self, counter, X, Y):
+        """
+        Train one of the init models on 200 examples and compute the first metric.
+        
+        Parameters
+        ----------
+        counter : int
+            Counter indicating where to choose the 200 examples 
+        X: np.ndarray
+            (n_samples, n_features) features of elements preferred to Y elements
+        Y: np.ndarray
+            (n_samples, n_features) features of unchosen elements
+        
+        Returns
+        -------
+        None
+        """
+        initialisation_model = TwoClustersMIP(n_pieces=self.n_pieces, n_clusters=self.n_clusters)
+        initialisation_model.fit(X[counter*200:(counter+1)*200], Y[counter*200:(counter+1)*200])
+
+        pairs_explained = PairsExplained()
+        cluster_intersection = ClusterIntersection()
+        metric_pairs = pairs_explained.from_model(initialisation_model, X, Y)
+        self.list_initialisation_models.append([initialisation_model, metric_pairs])
+
     def fit(self, X, Y):
         """Estimation of the parameters - To be completed.
 
@@ -372,9 +397,23 @@ class HeuristicModel(BaseModel):
         self.n_pairs = len(X)
         self.n_criteria = len(X[0])
 
-        # MIP model trained on only 2000 examples to initialize the model
-        self.initialisation_model = TwoClustersMIP(n_pieces=self.n_pieces, n_clusters=self.n_clusters)
-        self.initialisation_model.fit(X[:200], Y[:200])
+        self.list_initialisation_models = []
+        # MIP model trained on only 200 examples to initialize the model
+        for counter in range(int(self.n_pairs/200)):
+            # We take the first iteration to be sure to have one
+            if len(self.list_initialisation_models) == 0:
+                self.train_init_model(counter, X, Y)
+
+            # We only take 10% of the inits randomly
+            elif rd.random() <= 0.1:
+                self.train_init_model(counter, X, Y)
+
+        self.initialisation_model = self.list_initialisation_models[0][0]
+        highscore = self.list_initialisation_models[0][1]
+        for model in self.list_initialisation_models:
+            if model[1] > highscore:
+                self.initialisation_model = model[0]
+                highscore = model[1]
 
         # Initialize the products in the clusters depending on the initialisation MIP model
         init_results_x = self.initialisation_model.predict_utility(X)
