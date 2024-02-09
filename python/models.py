@@ -359,7 +359,7 @@ class HeuristicModel(BaseModel):
             best_clusters.append(np.argmax(np.array(list_scores)))
         return best_clusters
 
-    def fit(self, X, Y, Z):
+    def fit(self, X, Y):
         """Estimation of the parameters - To be completed.
 
         Parameters
@@ -389,10 +389,6 @@ class HeuristicModel(BaseModel):
         self.delta_j_k = np.array(self.delta_j_k)
         self.delta_j_k_bool = np.array(self.delta_j_k, dtype=bool)
 
-        # pairs_explained = PairsExplained()
-        # cluster_intersection = ClusterIntersection()
-        # self.list_results = []
-
         for iteration in tqdm(range(self.nb_iterations)):
 
             # Fit the decision functions
@@ -411,11 +407,6 @@ class HeuristicModel(BaseModel):
                         self.delta_j_k_bool[j][cluster] = True
                     else:
                         self.delta_j_k_bool[j][cluster] = False
-
-            # list_temp = [pairs_explained.from_model(self, X, Y), cluster_intersection.from_model(self, X, Y, Z)]
-            # self.list_results.append(list_temp)
-            # print("---------", list_temp)
-
 
     def predict_utility(self, X):
         """Return Decision Function of the MIP for X. - To be completed.
