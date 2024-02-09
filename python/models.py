@@ -158,6 +158,133 @@ class RandomExampleModel(BaseModel):
             (n_samples, n_features) list of features of elements
         """
         return np.stack([np.dot(X, self.weights[0]), np.dot(X, self.weights[1])], axis=1)
+    
+
+class OneClusterMIP(BaseModel):
+    """Class representing a MIP with one cluster"""
+
+    def __init__(self, n_pieces):
+        """Initialization of the MIP Variables
+
+        Parameters
+        ----------
+        n_pieces: int
+            Number of pieces for the utility function of each feature.
+        """
+        self.seed = 123
+        self.n_pieces = n_pieces
+        self.epsilon = 0.0001
+        self.model = self.instantiate()
+
+    def compute_score(self, x, evaluate:bool=False):
+        get_val = (lambda v: v.X) if evaluate else (lambda v: v)
+        score = 0
+
+        width_interval = 1 / self.n_pieces
+        for i in range(self.n_criteria):
+            x_i = x[i]
+            if x_i == 1:
+                l = self.n_pieces
+            else:
+                l = int((x_i / width_interval) + 1)
+            x_i_l = l * width_interval
+
+            a = (get_val(self.score_i_l[i][l]) - get_val(self.score_i_l[i][l - 1])) / width_interval
+            offset = x_i_l - width_interval
+            b = get_val(self.score_i_l[i][l - 1])
+
+            # Equation of the affine line => impact of criterion i on the score
+            score += a * (x_i - offset) + b
+        return score
+
+    def instantiate(self):
+        """Instantiation of the MIP Variables"""
+        # Gurobi model instantiation
+        model = gp.Model("OneClusterMIP")
+
+        return model
+
+    def fit(self, X, Y):
+        """Estimation of the parameters
+
+        Parameters
+        ----------
+        X: np.ndarray
+            (n_samples, n_features) features of elements preferred to Y elements
+        Y: np.ndarray
+            (n_samples, n_features) features of unchosen elements
+        """
+        self.n_pairs = len(X)
+        self.n_criteria = len(X[0])
+
+        ### Variables ###
+
+        # Surestimation error on x
+        self.sigma_x_plus = [self.model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"sigma_x_+_{j}") for j in range(self.n_pairs)]
+        # Underestimation error on x
+        self.sigma_x_minus = [self.model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"sigma_x_-_{j}") for j in range(self.n_pairs)]
+        # Surestimation error on y
+        self.sigma_y_plus = [self.model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"sigma_y_+_{j}") for j in range(self.n_pairs)]
+        # Underestimation error on y
+        self.sigma_y_minus = [self.model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"sigma_y_-_{j}") for j in range(self.n_pairs)]
+        M = self.n_criteria
+
+        self.score_i_l = []
+        for i in range(self.n_criteria):
+            list_temp_l = []
+            for l in range(self.n_pieces + 1):
+                list_temp_l.append(self.model.addVar(lb=0, ub=1, vtype='C', name=f"score_i_l_{i}_{l}"))
+            self.score_i_l.append(list_temp_l)
+
+        # Update of the model
+        self.model.update()
+
+        ### Objective function ###
+        self.model.setObjective(quicksum(self.sigma_x_plus) + quicksum(self.sigma_x_minus) + quicksum(self.sigma_y_plus) + quicksum(self.sigma_y_minus), GRB.MINIMIZE)
+
+        # Contrainte 1: Origine à 0
+        for i in range(self.n_criteria):
+            self.model.addConstr(self.score_i_l[i][0] == 0)
+
+        # Contrainte 2: Normalisation
+        self.model.addConstr(quicksum(self.score_i_l[i][self.n_pieces] for i in range(self.n_criteria)) == 1)
+
+        # Contrainte 3: Croissance des fonctions par morceaux
+        for i in range(self.n_criteria):
+            for l in range(self.n_pieces):
+                self.model.addConstr(self.score_i_l[i][l + 1] >= self.score_i_l[i][l])
+
+        # Contrainte 4: Contrainte sur les erreurs avec les points de cassure
+        for j in range(self.n_pairs):
+            x = X[j]
+            y = Y[j]
+            score_x = self.compute_score(x)
+            score_y = self.compute_score(y)
+            self.model.addConstr((score_x - self.sigma_x_plus[j] + self.sigma_x_minus[j]) - (score_y - self.sigma_y_plus[j] + self.sigma_y_minus[j]) >= self.epsilon)
+
+        # Solve it!
+        self.model.optimize()
+
+        if self.model.status == GRB.INFEASIBLE:
+            print("--- No solution ---")
+        elif self.model.status == GRB.UNBOUNDED:
+            print("--- Unbounded ---")
+        else:
+            print("--- Solution found ---")
+
+    def predict_utility(self, X):
+        """Return Decision Function of the MIP for X.
+
+        Parameters:
+        -----------
+        X: np.ndarray
+            (n_samples, n_features) list of features of elements
+        """
+        results = []
+        for x in X:
+            results.append(self.compute_score(x, evaluate=True))
+        return np.array(results)
+
 
 class TwoClustersMIP(BaseModel):
     """Skeleton of MIP you have to write as the first exercise.
